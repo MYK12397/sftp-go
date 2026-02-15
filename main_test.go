@@ -113,12 +113,13 @@ func BenchmarkTransferFilesVariousConfigs(b *testing.B) {
 // TransferFilesMock is a test-friendly wrapper that accepts the mock client
 func (cfg PipelineCfg) TransferFilesMock(client interface {
 	Open(string) (io.ReadCloser, error)
-}, jobs []FileJob, processFunc ProcessFunc) (transferred int32, failed int32) {
+}, jobs []FileJob, processFunc ProcessFunc,
+) (transferred int32, failed int32) {
 	jobsChan := make(chan FileJob, len(jobs))
 	resultsChan := make(chan FileResult, cfg.BufferSize)
 	start := time.Now()
 
-	//Dispatch jobs
+	// Add Jobs to `jobsChan`
 	go func() {
 		for _, job := range jobs {
 			jobsChan <- job
@@ -126,12 +127,10 @@ func (cfg PipelineCfg) TransferFilesMock(client interface {
 		close(jobsChan)
 	}()
 
-	//parallel reads
+	// Spin up Go Routine for each `job`
 	var readWg sync.WaitGroup
 	for i := 0; i < cfg.SFTPReaders; i++ {
-		readWg.Add(1)
-		go func() {
-			defer readWg.Done()
+		readWg.Go(func() {
 			for job := range jobsChan {
 				f, err := client.Open(job.RemotePath)
 				if err != nil {
@@ -146,20 +145,19 @@ func (cfg PipelineCfg) TransferFilesMock(client interface {
 				}
 				resultsChan <- FileResult{ID: job.ID, Data: data}
 			}
-		}()
+		})
 	}
 
+	// Wait for Jobs to be Read
 	go func() {
 		readWg.Wait()
 		close(resultsChan)
 	}()
 
-	//process results
+	// Sping up Go Routine to 'processFunc' foreach job
 	var processWg sync.WaitGroup
 	for i := 0; i < cfg.Workers; i++ {
-		processWg.Add(1)
-		go func() {
-			defer processWg.Done()
+		processWg.Go(func() {
 			for result := range resultsChan {
 				if err := processFunc(result); err != nil {
 					atomic.AddInt32(&failed, 1)
@@ -167,10 +165,12 @@ func (cfg PipelineCfg) TransferFilesMock(client interface {
 					atomic.AddInt32(&transferred, 1)
 				}
 			}
-		}()
+		})
 	}
 
+	// Wait for `processFunc` to complete
 	processWg.Wait()
+
 	elapsed := time.Since(start)
 	fmt.Printf("Transfer completed in %s. Success: %d, Failed: %d\n", elapsed, transferred, failed)
 	return transferred, failed
