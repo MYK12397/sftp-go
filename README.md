@@ -24,17 +24,17 @@ go get github.com/MYK12397/sftp-pipeline
  // Write to local disk
  TransferFiles(sftpClient, jobs, func(r FileResult) error{
      return os.WriteFile("/data/"+r.ID, r.Data, 0644)
- }, DefaultCfg())
+ })
 
 //upload to cloud storage
 TransferFiles(sftpClient, jobs, func(r FileResult) error{
      return cloudClient.Upload(r.ID, r.Data)
- }, DefaultCfg())
+ })
 
 TransferFiles(sftpClient, jobs, func(r FileResult) error{
      text := extractText(r.Data)
      return cloudClient.Upload(r.ID, r.Data)
- }, DefaultCfg())
+ })
 ```
 ## Configuration
 

@@ -1,6 +1,6 @@
 module github.com/MYK12397/sftp-go
 
-go 1.23.1
+go 1.26.0
 
 require github.com/pkg/sftp v1.13.10
 
