@@ -42,6 +42,7 @@ func (cfg PipelineCfg) TransferFiles(sftpClient *sftp.Client, jobs []FileJob, pr
 	resultsChan := make(chan FileResult, cfg.BufferSize)
 	start := time.Now()
 
+	// Add Jobs to `jobsChan`
 	go func() {
 		for _, job := range jobs {
 			jobsChan <- job
@@ -49,11 +50,10 @@ func (cfg PipelineCfg) TransferFiles(sftpClient *sftp.Client, jobs []FileJob, pr
 		close(jobsChan)
 	}()
 
+	// Spin up Go Routine for each `job`
 	var readWg sync.WaitGroup
 	for i := 0; i < cfg.SFTPReaders; i++ {
-		readWg.Add(1)
-		go func() {
-			defer readWg.Done()
+		readWg.Go(func() {
 			for job := range jobsChan {
 				f, err := sftpClient.Open(job.RemotePath)
 				if err != nil {
@@ -68,19 +68,19 @@ func (cfg PipelineCfg) TransferFiles(sftpClient *sftp.Client, jobs []FileJob, pr
 				}
 				resultsChan <- FileResult{ID: job.ID, Data: data}
 			}
-		}()
+		})
 	}
 
+	// Wait for Jobs to be Read
 	go func() {
 		readWg.Wait()
 		close(resultsChan)
 	}()
 
+	// Sping up Go Routine to 'processFunc' foreach job
 	var processWg sync.WaitGroup
 	for i := 0; i < cfg.Workers; i++ {
-		processWg.Add(1)
-		go func() {
-			defer processWg.Done()
+		processWg.Go(func() {
 			for result := range resultsChan {
 				if err := processFunc(result); err != nil {
 					atomic.AddInt32(&failed, 1)
@@ -88,9 +88,10 @@ func (cfg PipelineCfg) TransferFiles(sftpClient *sftp.Client, jobs []FileJob, pr
 					atomic.AddInt32(&transferred, 1)
 				}
 			}
-		}()
+		})
 	}
 
+	// Wait for `processFunc` to complete
 	processWg.Wait()
 
 	fmt.Printf("Transfer completed in %s. Success: %d, Failed: %d\n", time.Since(start), transferred, failed)
